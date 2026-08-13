@@ -24,6 +24,8 @@ MAX_RETRIES = 3
 RETRY_DELAY = 2  # seconds
 
 
+import asyncio
+
 async def call_gemini(prompt: str, system_instruction: str = "", max_tokens: int = 8192) -> str:
     """
     Send a prompt to Gemini and return the text response.
@@ -41,7 +43,8 @@ async def call_gemini(prompt: str, system_instruction: str = "", max_tokens: int
     for model_name in FALLBACK_MODELS:
         for attempt in range(MAX_RETRIES):
             try:
-                response = client.models.generate_content(
+                # IMPORTANT: Use .aio. for async calls so we don't block the FastAPI event loop
+                response = await client.aio.models.generate_content(
                     model=model_name,
                     contents=prompt,
                     config=config,
@@ -53,7 +56,7 @@ async def call_gemini(prompt: str, system_instruction: str = "", max_tokens: int
                 # 503 UNAVAILABLE or 429 RESOURCE_EXHAUSTED → retry/fallback
                 if "503" in error_str or "429" in error_str:
                     print(f"[NOQUE] Model {model_name} attempt {attempt+1} failed ({error_str[:60]}), retrying...")
-                    time.sleep(RETRY_DELAY * (attempt + 1))
+                    await asyncio.sleep(RETRY_DELAY * (attempt + 1))
                     continue
                 else:
                     # Other errors (400, 404, etc.) → don't retry, re-raise
@@ -61,7 +64,7 @@ async def call_gemini(prompt: str, system_instruction: str = "", max_tokens: int
             except Exception as e:
                 last_error = e
                 print(f"[NOQUE] Unexpected error with {model_name}: {e}")
-                time.sleep(RETRY_DELAY)
+                await asyncio.sleep(RETRY_DELAY)
                 break  # Move to next model
 
     # If all models and retries exhausted, raise the last error
