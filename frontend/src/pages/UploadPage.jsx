@@ -1,7 +1,7 @@
 import { useState, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { useDropzone } from "react-dropzone";
-import { Upload, Github, ArrowRight, FileArchive, Sparkles, GitBranch, TestTube, RefreshCw } from "lucide-react";
+import { Upload, Code, ArrowRight, FileArchive, Sparkles, GitBranch, TestTube, RefreshCw } from "lucide-react";
 import { createJobFromZip, createJobFromGitHub } from "../api";
 
 export default function UploadPage() {
@@ -252,7 +252,7 @@ export default function UploadPage() {
               padding: "0 14px",
             }}
           >
-            <Github size={18} color="var(--color-text-muted)" />
+            <Code size={18} color="var(--color-text-muted)" />
             <input
               type="text"
               placeholder="https://github.com/user/repo"

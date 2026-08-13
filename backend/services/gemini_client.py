@@ -1,19 +1,33 @@
 """
 gemini_client.py — Centralized Google Gemini API client.
-Handles all interactions with the Gemini 1.5 Pro model.
+Handles all interactions with the Gemini model.
+Includes automatic retry and model fallback for resilience.
 """
 import json
+import time
 from google import genai
+from google.genai import errors as genai_errors
 from config import get_settings
 
 settings = get_settings()
 client = genai.Client(api_key=settings.GEMINI_API_KEY)
 
+# Fallback models in order of preference
+FALLBACK_MODELS = [
+    settings.GEMINI_MODEL,      # Primary (gemini-3.6-flash)
+    "gemini-3.5-flash-lite",    # Fast fallback
+    "gemini-flash-latest",      # Generic latest fallback
+    "gemini-3.5-flash",         # Previous gen fallback
+]
+
+MAX_RETRIES = 3
+RETRY_DELAY = 2  # seconds
+
 
 async def call_gemini(prompt: str, system_instruction: str = "", max_tokens: int = 8192) -> str:
     """
     Send a prompt to Gemini and return the text response.
-    Uses the synchronous SDK wrapped for our async pipeline.
+    Automatically retries with fallback models on 503/429 errors.
     """
     config = genai.types.GenerateContentConfig(
         max_output_tokens=max_tokens,
@@ -22,12 +36,36 @@ async def call_gemini(prompt: str, system_instruction: str = "", max_tokens: int
     if system_instruction:
         config.system_instruction = system_instruction
 
-    response = client.models.generate_content(
-        model=settings.GEMINI_MODEL,
-        contents=prompt,
-        config=config,
-    )
-    return response.text
+    last_error = None
+
+    for model_name in FALLBACK_MODELS:
+        for attempt in range(MAX_RETRIES):
+            try:
+                response = client.models.generate_content(
+                    model=model_name,
+                    contents=prompt,
+                    config=config,
+                )
+                return response.text
+            except genai_errors.ClientError as e:
+                last_error = e
+                error_str = str(e)
+                # 503 UNAVAILABLE or 429 RESOURCE_EXHAUSTED → retry/fallback
+                if "503" in error_str or "429" in error_str:
+                    print(f"[NOQUE] Model {model_name} attempt {attempt+1} failed ({error_str[:60]}), retrying...")
+                    time.sleep(RETRY_DELAY * (attempt + 1))
+                    continue
+                else:
+                    # Other errors (400, 404, etc.) → don't retry, re-raise
+                    raise
+            except Exception as e:
+                last_error = e
+                print(f"[NOQUE] Unexpected error with {model_name}: {e}")
+                time.sleep(RETRY_DELAY)
+                break  # Move to next model
+
+    # If all models and retries exhausted, raise the last error
+    raise last_error
 
 
 async def call_gemini_json(prompt: str, system_instruction: str = "", max_tokens: int = 8192) -> dict | list:

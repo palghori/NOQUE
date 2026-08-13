@@ -4,7 +4,7 @@ from functools import lru_cache
 
 class Settings(BaseSettings):
     # Database — Render provides postgres:// but SQLAlchemy needs postgresql+asyncpg://
-    DATABASE_URL: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/codeoracle"
+    DATABASE_URL: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/noque"
 
     @property
     def async_database_url(self) -> str:
@@ -18,13 +18,13 @@ class Settings(BaseSettings):
 
     # Google Gemini
     GEMINI_API_KEY: str = ""
-    GEMINI_MODEL: str = "gemini-2.5-pro"
+    GEMINI_MODEL: str = "gemini-3.6-flash"
 
     # Processing
     MAX_FILE_SIZE_MB: int = 25
     COVERAGE_THRESHOLD: int = 60
     MAX_TEST_RETRIES: int = 3
-    TEMP_DIR: str = "/tmp/codeoracle"
+    TEMP_DIR: str = "/tmp/noque"
 
     # Supported extensions
     SUPPORTED_EXTENSIONS: list[str] = [".py", ".js"]

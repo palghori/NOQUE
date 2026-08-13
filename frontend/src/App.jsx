@@ -53,7 +53,7 @@ function App() {
                 letterSpacing: "-0.02em",
               }}
             >
-              Code<span style={{ color: "var(--color-accent-light)" }}>Oracle</span>
+              NO<span style={{ color: "var(--color-accent-light)" }}>QUE</span>
             </span>
           </a>
           <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>

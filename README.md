@@ -1,8 +1,8 @@
-# CodeOracle — AI-Powered Legacy Codebase Explainer & Modernizer
+# NOQUE — AI-Powered Legacy Codebase Explainer & Modernizer
 
 > **HackOrbit | PS-06** — Built for the Google Developer Group hackathon.
 
-CodeOracle takes a legacy codebase (ZIP upload or GitHub URL) and uses **Google Gemini 1.5 Pro** to automatically generate:
+NOQUE takes a legacy codebase (ZIP upload or GitHub URL) and uses **Google Gemini 1.5 Pro** to automatically generate:
 
 1. 🧠 **Natural Language Explanations** — Module & function-level summaries with confidence scores.
 2. 🕸️ **Dependency Graph** — Interactive force-directed visualization of imports and function calls.
@@ -47,7 +47,7 @@ Open **http://localhost:5173** and upload a ZIP of your legacy codebase!
 ## Project Structure
 
 ```
-codeoracle/
+noque/
 ├── backend/
 │   ├── main.py                  # FastAPI entry point
 │   ├── config.py                # Environment settings

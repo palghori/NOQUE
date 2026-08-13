@@ -16,7 +16,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 
 # Create temp directory for processing
-RUN mkdir -p /tmp/codeoracle
+RUN mkdir -p /tmp/noque
 
 # Expose port
 EXPOSE 8000

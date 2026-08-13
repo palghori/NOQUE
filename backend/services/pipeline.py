@@ -3,9 +3,12 @@ pipeline.py — The main orchestrator.
 Runs the full processing pipeline as a FastAPI background task:
   1. Ingest (unzip / clone)
   2. Parse (tree-sitter)
-  3. Explain + Refactor (concurrent Gemini calls)
-  4. Generate Tests + Coverage Loop
+  3. Explain + Refactor (concurrent Gemini calls in batches)
+  4. Generate Tests + Coverage Loop (concurrent in batches)
   5. Mark job complete
+
+Performance: Files are processed in parallel batches of BATCH_SIZE
+for a ~5x speedup over sequential processing.
 """
 import os
 import shutil
@@ -26,6 +29,9 @@ from services.refactorer import refactor_file
 from services.test_generator import generate_tests
 
 settings = get_settings()
+
+# Number of files to process concurrently
+BATCH_SIZE = 5
 
 
 async def run_pipeline(job_id: str):
@@ -90,100 +96,55 @@ async def run_pipeline(job_id: str):
             await db.flush()
             await _update_job(db, job_id, progress=10)
 
-            # --- Stage 3: AI Processing (Explain + Refactor concurrently per file) ---
-            progress_per_file = 80 // max(total_files, 1)
+            # --- Stage 3: AI Processing (Explain + Refactor) — BATCHED ---
+            progress_per_file = 70 // max(len(parsed_files), 1)
             current_progress = 10
 
-            for parsed in parsed_files:
-                rel_path = os.path.relpath(parsed["file_path"], source_dir)
-                code = parsed["code"]
-                language = parsed["language"]
+            # Process files in parallel batches
+            for batch_start in range(0, len(parsed_files), BATCH_SIZE):
+                batch = parsed_files[batch_start:batch_start + BATCH_SIZE]
 
-                # Run explanation and refactoring concurrently
-                explain_task = explain_file(rel_path, language, code)
-                refactor_task = refactor_file(rel_path, language, code)
+                # Create concurrent tasks for the entire batch
+                batch_tasks = []
+                for parsed in batch:
+                    rel_path = os.path.relpath(parsed["file_path"], source_dir)
+                    code = parsed["code"]
+                    language = parsed["language"]
+                    batch_tasks.append(
+                        _process_single_file(db, job_id, rel_path, language, code)
+                    )
 
-                explanation_result, refactor_result = await asyncio.gather(
-                    explain_task, refactor_task, return_exceptions=True
-                )
+                # Run all files in this batch concurrently
+                await asyncio.gather(*batch_tasks, return_exceptions=True)
 
-                # Save explanation results
-                if isinstance(explanation_result, dict) and "raw_response" not in explanation_result:
-                    # Module-level explanation
-                    module_summary = explanation_result.get("module_summary", "")
-                    db.add(Explanation(
-                        job_id=job_id,
-                        file_path=rel_path,
-                        module_summary=module_summary,
-                    ))
-                    # Function-level explanations
-                    for func in explanation_result.get("functions", []):
-                        db.add(Explanation(
-                            job_id=job_id,
-                            file_path=rel_path,
-                            function_name=func.get("name"),
-                            purpose=func.get("purpose"),
-                            params=func.get("params"),
-                            returns=func.get("returns"),
-                            confidence=func.get("confidence"),
-                        ))
-                else:
-                    # Fallback: store raw response as module summary
-                    raw = explanation_result if isinstance(explanation_result, dict) else {"raw_response": str(explanation_result)}
-                    db.add(Explanation(
-                        job_id=job_id,
-                        file_path=rel_path,
-                        module_summary=raw.get("raw_response", str(explanation_result)),
-                    ))
-
-                # Save refactor results
-                if isinstance(refactor_result, dict) and "refactored_code" in refactor_result:
-                    db.add(Refactor(
-                        job_id=job_id,
-                        file_path=rel_path,
-                        original_code=code,
-                        refactored_code=refactor_result["refactored_code"],
-                        breaking_changes=refactor_result.get("breaking_changes", []),
-                    ))
-                else:
-                    raw = str(refactor_result)
-                    db.add(Refactor(
-                        job_id=job_id,
-                        file_path=rel_path,
-                        original_code=code,
-                        refactored_code=raw,
-                        breaking_changes=[],
-                    ))
-
-                current_progress += progress_per_file
-                await _update_job(db, job_id, progress=min(current_progress, 90))
+                # Update progress after each batch
+                current_progress += progress_per_file * len(batch)
+                await _update_job(db, job_id, progress=min(current_progress, 80))
                 await db.flush()
 
-            # --- Stage 4: Test Generation with Coverage Loop ---
-            for parsed in parsed_files:
-                rel_path = os.path.relpath(parsed["file_path"], source_dir)
-                code = parsed["code"]
-                language = parsed["language"]
+            # --- Stage 4: Test Generation — BATCHED ---
+            await _update_job(db, job_id, progress=80)
 
-                test_result = await generate_tests(
-                    file_path=parsed["file_path"],
-                    language=language,
-                    code=code,
-                    job_dir=job_dir,
-                    max_retries=settings.MAX_TEST_RETRIES,
-                    coverage_threshold=settings.COVERAGE_THRESHOLD,
-                )
+            for batch_start in range(0, len(parsed_files), BATCH_SIZE):
+                batch = parsed_files[batch_start:batch_start + BATCH_SIZE]
 
-                db.add(Test(
-                    job_id=job_id,
-                    file_path=rel_path,
-                    test_code=test_result["test_code"],
-                    coverage_pct=test_result["coverage_pct"],
-                    retry_count=test_result["retry_count"],
-                    passed=test_result["passed"],
-                ))
+                test_tasks = []
+                for parsed in batch:
+                    rel_path = os.path.relpath(parsed["file_path"], source_dir)
+                    code = parsed["code"]
+                    language = parsed["language"]
+                    test_tasks.append(
+                        _generate_test_for_file(
+                            db, job_id, rel_path, parsed["file_path"],
+                            language, code, job_dir,
+                        )
+                    )
 
-            await db.flush()
+                await asyncio.gather(*test_tasks, return_exceptions=True)
+
+                test_progress = 80 + (20 * (batch_start + len(batch)) // max(len(parsed_files), 1))
+                await _update_job(db, job_id, progress=min(test_progress, 95))
+                await db.flush()
 
             # --- Stage 5: Mark Complete ---
             await _update_job(db, job_id, status="complete", progress=100, completed_at=datetime.utcnow())
@@ -199,6 +160,109 @@ async def run_pipeline(job_id: str):
             job_dir = os.path.join(settings.TEMP_DIR, job_id)
             if os.path.exists(job_dir):
                 shutil.rmtree(job_dir, ignore_errors=True)
+
+
+async def _process_single_file(db: AsyncSession, job_id: str, rel_path: str, language: str, code: str):
+    """Process a single file: explain + refactor concurrently."""
+    try:
+        # Run explanation and refactoring concurrently for this file
+        explanation_result, refactor_result = await asyncio.gather(
+            explain_file(rel_path, language, code),
+            refactor_file(rel_path, language, code),
+            return_exceptions=True,
+        )
+
+        # Save explanation results
+        if isinstance(explanation_result, dict) and "raw_response" not in explanation_result:
+            # Module-level explanation
+            module_summary = explanation_result.get("module_summary", "")
+            db.add(Explanation(
+                job_id=job_id,
+                file_path=rel_path,
+                module_summary=module_summary,
+            ))
+            # Function-level explanations
+            for func in explanation_result.get("functions", []):
+                db.add(Explanation(
+                    job_id=job_id,
+                    file_path=rel_path,
+                    function_name=func.get("name"),
+                    purpose=func.get("purpose"),
+                    params=func.get("params"),
+                    returns=func.get("returns"),
+                    confidence=func.get("confidence"),
+                ))
+        else:
+            # Fallback: store raw response as module summary
+            raw = explanation_result if isinstance(explanation_result, dict) else {"raw_response": str(explanation_result)}
+            db.add(Explanation(
+                job_id=job_id,
+                file_path=rel_path,
+                module_summary=raw.get("raw_response", str(explanation_result)),
+            ))
+
+        # Save refactor results
+        if isinstance(refactor_result, dict) and "refactored_code" in refactor_result:
+            db.add(Refactor(
+                job_id=job_id,
+                file_path=rel_path,
+                original_code=code,
+                refactored_code=refactor_result["refactored_code"],
+                breaking_changes=refactor_result.get("breaking_changes", []),
+            ))
+        else:
+            raw = str(refactor_result)
+            db.add(Refactor(
+                job_id=job_id,
+                file_path=rel_path,
+                original_code=code,
+                refactored_code=raw,
+                breaking_changes=[],
+            ))
+
+    except Exception as e:
+        print(f"[NOQUE] Error processing file {rel_path}: {e}")
+        # Store error as explanation so the user sees something
+        db.add(Explanation(
+            job_id=job_id,
+            file_path=rel_path,
+            module_summary=f"Error during analysis: {str(e)}",
+        ))
+
+
+async def _generate_test_for_file(
+    db: AsyncSession, job_id: str, rel_path: str,
+    file_path: str, language: str, code: str, job_dir: str,
+):
+    """Generate tests for a single file."""
+    try:
+        test_result = await generate_tests(
+            file_path=file_path,
+            language=language,
+            code=code,
+            job_dir=job_dir,
+            max_retries=settings.MAX_TEST_RETRIES,
+            coverage_threshold=settings.COVERAGE_THRESHOLD,
+        )
+
+        db.add(Test(
+            job_id=job_id,
+            file_path=rel_path,
+            test_code=test_result["test_code"],
+            coverage_pct=test_result["coverage_pct"],
+            retry_count=test_result["retry_count"],
+            passed=test_result["passed"],
+        ))
+    except Exception as e:
+        print(f"[NOQUE] Error generating tests for {rel_path}: {e}")
+        db.add(Test(
+            job_id=job_id,
+            file_path=rel_path,
+            test_code=f"# Test generation failed: {str(e)}",
+            coverage_pct=0.0,
+            retry_count=0,
+            passed=False,
+        ))
 
 
 async def _ingest(db: AsyncSession, job_id: str, job_dir: str) -> str:

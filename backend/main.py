@@ -1,5 +1,5 @@
 """
-CodeOracle — AI-Powered Legacy Codebase Explainer & Modernizer
+NOQUE — AI-Powered Legacy Codebase Explainer & Modernizer
 FastAPI Application Entry Point
 """
 from contextlib import asynccontextmanager
@@ -25,7 +25,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title="CodeOracle API",
+    title="NOQUE API",
     description="AI-Powered Legacy Codebase Explainer & Modernizer",
     version="1.0.0",
     lifespan=lifespan,
@@ -46,7 +46,7 @@ app.include_router(jobs_router)
 
 @app.get("/")
 async def root():
-    return {"message": "CodeOracle API is running", "version": "1.0.0"}
+    return {"message": "NOQUE API is running", "version": "1.0.0"}
 
 
 @app.get("/health")

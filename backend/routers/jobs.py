@@ -58,7 +58,7 @@ async def create_job(
         status="queued",
     )
     db.add(job)
-    await db.flush()
+    await db.commit()
 
     # Trigger the processing pipeline as a background task
     from services.pipeline import run_pipeline
