@@ -19,9 +19,9 @@ services:
       - key: GEMINI_API_KEY
         sync: false  # User must set this manually in the Render dashboard
       - key: GEMINI_MODEL
-        value: gemini-2.5-pro
+        value: gemini-3.6-flash
       - key: CORS_ORIGINS
-        value: https://noque.onrender.com,http://localhost:5173
+        value: "*"
       - key: MAX_FILE_SIZE_MB
         value: "25"
       - key: COVERAGE_THRESHOLD
@@ -29,24 +29,7 @@ services:
       - key: MAX_TEST_RETRIES
         value: "3"
 
-  # ── Frontend (React Static Site) ───────────────────
-  - type: web
-    name: noque
-    runtime: static
-    buildCommand: cd frontend && npm install && npm run build
-    staticPublishPath: ./frontend/dist
-    plan: free
-    headers:
-      - path: /*
-        name: X-Frame-Options
-        value: SAMEORIGIN
-    routes:
-      - type: rewrite
-        source: /*
-        destination: /index.html
-    envVars:
-      - key: VITE_API_URL
-        value: https://noque-api.onrender.com/api
+
 
 # ── PostgreSQL Database ──────────────────────────────
 databases:
