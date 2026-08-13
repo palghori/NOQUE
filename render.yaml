@@ -12,10 +12,7 @@ services:
     healthCheckPath: /health
     envVars:
       - key: DATABASE_URL
-        fromDatabase:
-          name: noque-db
-          property: connectionString
-        # Render provides a postgres:// URL; we need postgresql+asyncpg://
+        sync: false  # User will provide their existing database URL manually
       - key: GEMINI_API_KEY
         sync: false  # User must set this manually in the Render dashboard
       - key: GEMINI_MODEL
@@ -31,9 +28,3 @@ services:
 
 
 
-# ── PostgreSQL Database ──────────────────────────────
-databases:
-  - name: noque-db
-    plan: free
-    databaseName: noque
-    user: noque
