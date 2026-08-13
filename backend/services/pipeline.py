@@ -39,127 +39,157 @@ async def run_pipeline(job_id: str):
     Main pipeline entry point. Called as a background task by FastAPI.
     All state is written to PostgreSQL so the frontend can poll for progress.
     """
-    async with async_session() as db:
-        try:
-            await _update_job(db, job_id, status="processing", progress=0)
+    print(f"[NOQUE] ===== Pipeline started for job {job_id} =====")
 
-            # --- Stage 1: Ingestion ---
-            job_dir = os.path.join(settings.TEMP_DIR, job_id)
-            source_dir = await _ingest(db, job_id, job_dir)
+    try:
+        async with async_session() as db:
+            try:
+                print(f"[NOQUE] DB session created successfully")
+                await _update_job(db, job_id, status="processing", progress=0)
+                print(f"[NOQUE] Job status set to 'processing'")
 
-            # --- Stage 2: Parse files with Tree-sitter ---
-            source_files = collect_files(source_dir, settings.SUPPORTED_EXTENSIONS)
-            total_files = len(source_files)
-            if total_files == 0:
-                await _update_job(db, job_id, status="failed", error_message="No supported source files found in the upload.")
-                return
+                # --- Stage 1: Ingestion ---
+                job_dir = os.path.join(settings.TEMP_DIR, job_id)
+                print(f"[NOQUE] Stage 1: Ingesting from {job_dir}")
+                source_dir = await _ingest(db, job_id, job_dir)
+                print(f"[NOQUE] Stage 1 complete: source_dir={source_dir}")
 
-            await _update_job(db, job_id, total_files=total_files)
+                # --- Stage 2: Parse files with Tree-sitter ---
+                print(f"[NOQUE] Stage 2: Collecting files...")
+                source_files = collect_files(source_dir, settings.SUPPORTED_EXTENSIONS)
+                total_files = len(source_files)
+                print(f"[NOQUE] Found {total_files} supported files: {source_files}")
 
-            parsed_files = []
-            for fpath in source_files:
-                parsed = parse_file(fpath)
-                if parsed:
-                    parsed_files.append(parsed)
-                    # Register file in DB
-                    rel_path = os.path.relpath(fpath, source_dir)
-                    file_record = File(
-                        job_id=job_id,
-                        file_path=rel_path,
-                        language=parsed["language"],
-                        line_count=parsed["line_count"],
-                    )
-                    db.add(file_record)
+                if total_files == 0:
+                    await _update_job(db, job_id, status="failed", error_message="No supported source files found in the upload.")
+                    return
 
-            await db.flush()
+                await _update_job(db, job_id, total_files=total_files)
 
-            # --- Stage 2b: Build Dependency Graph ---
-            for parsed in parsed_files:
-                rel_path = os.path.relpath(parsed["file_path"], source_dir)
-                for imp in parsed["imports"]:
-                    edge = GraphEdge(
-                        job_id=job_id,
-                        from_node=rel_path,
-                        to_node=imp,
-                        edge_type="import",
-                    )
-                    db.add(edge)
-                for call in parsed["calls"]:
-                    edge = GraphEdge(
-                        job_id=job_id,
-                        from_node=rel_path,
-                        to_node=call,
-                        edge_type="call",
-                    )
-                    db.add(edge)
-
-            await db.flush()
-            await _update_job(db, job_id, progress=10)
-
-            # --- Stage 3: AI Processing (Explain + Refactor) — BATCHED ---
-            progress_per_file = 70 // max(len(parsed_files), 1)
-            current_progress = 10
-
-            # Process files in parallel batches
-            for batch_start in range(0, len(parsed_files), BATCH_SIZE):
-                batch = parsed_files[batch_start:batch_start + BATCH_SIZE]
-
-                # Create concurrent tasks for the entire batch
-                batch_tasks = []
-                for parsed in batch:
-                    rel_path = os.path.relpath(parsed["file_path"], source_dir)
-                    code = parsed["code"]
-                    language = parsed["language"]
-                    batch_tasks.append(
-                        _process_single_file(db, job_id, rel_path, language, code)
-                    )
-
-                # Run all files in this batch concurrently
-                await asyncio.gather(*batch_tasks, return_exceptions=True)
-
-                # Update progress after each batch
-                current_progress += progress_per_file * len(batch)
-                await _update_job(db, job_id, progress=min(current_progress, 80))
-                await db.flush()
-
-            # --- Stage 4: Test Generation — BATCHED ---
-            await _update_job(db, job_id, progress=80)
-
-            for batch_start in range(0, len(parsed_files), BATCH_SIZE):
-                batch = parsed_files[batch_start:batch_start + BATCH_SIZE]
-
-                test_tasks = []
-                for parsed in batch:
-                    rel_path = os.path.relpath(parsed["file_path"], source_dir)
-                    code = parsed["code"]
-                    language = parsed["language"]
-                    test_tasks.append(
-                        _generate_test_for_file(
-                            db, job_id, rel_path, parsed["file_path"],
-                            language, code, job_dir,
+                parsed_files = []
+                for fpath in source_files:
+                    print(f"[NOQUE] Parsing: {fpath}")
+                    parsed = parse_file(fpath)
+                    if parsed:
+                        parsed_files.append(parsed)
+                        rel_path = os.path.relpath(fpath, source_dir)
+                        file_record = File(
+                            job_id=job_id,
+                            file_path=rel_path,
+                            language=parsed["language"],
+                            line_count=parsed["line_count"],
                         )
-                    )
+                        db.add(file_record)
 
-                await asyncio.gather(*test_tasks, return_exceptions=True)
-
-                test_progress = 80 + (20 * (batch_start + len(batch)) // max(len(parsed_files), 1))
-                await _update_job(db, job_id, progress=min(test_progress, 95))
                 await db.flush()
+                print(f"[NOQUE] Stage 2: Parsed {len(parsed_files)} files")
 
-            # --- Stage 5: Mark Complete ---
-            await _update_job(db, job_id, status="complete", progress=100, completed_at=datetime.utcnow())
-            await db.commit()
+                # --- Stage 2b: Build Dependency Graph ---
+                for parsed in parsed_files:
+                    rel_path = os.path.relpath(parsed["file_path"], source_dir)
+                    for imp in parsed["imports"]:
+                        edge = GraphEdge(
+                            job_id=job_id,
+                            from_node=rel_path,
+                            to_node=imp,
+                            edge_type="import",
+                        )
+                        db.add(edge)
+                    for call in parsed["calls"]:
+                        edge = GraphEdge(
+                            job_id=job_id,
+                            from_node=rel_path,
+                            to_node=call,
+                            edge_type="call",
+                        )
+                        db.add(edge)
 
-        except Exception as e:
-            traceback.print_exc()
-            await _update_job(db, job_id, status="failed", error_message=str(e))
-            await db.commit()
+                await db.flush()
+                await _update_job(db, job_id, progress=10)
+                print(f"[NOQUE] Stage 2b: Dependency graph built")
 
-        finally:
-            # Clean up temp files
-            job_dir = os.path.join(settings.TEMP_DIR, job_id)
-            if os.path.exists(job_dir):
-                shutil.rmtree(job_dir, ignore_errors=True)
+                # --- Stage 3: AI Processing (Explain + Refactor) — BATCHED ---
+                print(f"[NOQUE] Stage 3: Starting AI explain + refactor...")
+                progress_per_file = 70 // max(len(parsed_files), 1)
+                current_progress = 10
+
+                for batch_start in range(0, len(parsed_files), BATCH_SIZE):
+                    batch = parsed_files[batch_start:batch_start + BATCH_SIZE]
+                    print(f"[NOQUE] Processing batch {batch_start//BATCH_SIZE + 1}: {len(batch)} files")
+
+                    batch_tasks = []
+                    for parsed in batch:
+                        rel_path = os.path.relpath(parsed["file_path"], source_dir)
+                        code = parsed["code"]
+                        language = parsed["language"]
+                        batch_tasks.append(
+                            _process_single_file(db, job_id, rel_path, language, code)
+                        )
+
+                    results = await asyncio.gather(*batch_tasks, return_exceptions=True)
+                    for i, r in enumerate(results):
+                        if isinstance(r, Exception):
+                            print(f"[NOQUE] Batch task {i} failed: {r}")
+
+                    current_progress += progress_per_file * len(batch)
+                    await _update_job(db, job_id, progress=min(current_progress, 80))
+                    await db.flush()
+
+                print(f"[NOQUE] Stage 3 complete")
+
+                # --- Stage 4: Test Generation — BATCHED ---
+                print(f"[NOQUE] Stage 4: Starting test generation...")
+                await _update_job(db, job_id, progress=80)
+
+                for batch_start in range(0, len(parsed_files), BATCH_SIZE):
+                    batch = parsed_files[batch_start:batch_start + BATCH_SIZE]
+                    print(f"[NOQUE] Test batch {batch_start//BATCH_SIZE + 1}: {len(batch)} files")
+
+                    test_tasks = []
+                    for parsed in batch:
+                        rel_path = os.path.relpath(parsed["file_path"], source_dir)
+                        code = parsed["code"]
+                        language = parsed["language"]
+                        test_tasks.append(
+                            _generate_test_for_file(
+                                db, job_id, rel_path, parsed["file_path"],
+                                language, code, job_dir,
+                            )
+                        )
+
+                    results = await asyncio.gather(*test_tasks, return_exceptions=True)
+                    for i, r in enumerate(results):
+                        if isinstance(r, Exception):
+                            print(f"[NOQUE] Test task {i} failed: {r}")
+
+                    test_progress = 80 + (20 * (batch_start + len(batch)) // max(len(parsed_files), 1))
+                    await _update_job(db, job_id, progress=min(test_progress, 95))
+                    await db.flush()
+
+                print(f"[NOQUE] Stage 4 complete")
+
+                # --- Stage 5: Mark Complete ---
+                await _update_job(db, job_id, status="complete", progress=100, completed_at=datetime.utcnow())
+                await db.commit()
+                print(f"[NOQUE] ===== Pipeline COMPLETE for job {job_id} =====")
+
+            except Exception as e:
+                print(f"[NOQUE] ===== Pipeline FAILED for job {job_id}: {e} =====")
+                traceback.print_exc()
+                try:
+                    await _update_job(db, job_id, status="failed", error_message=str(e))
+                    await db.commit()
+                except Exception as db_err:
+                    print(f"[NOQUE] Failed to update job status in DB: {db_err}")
+
+            finally:
+                job_dir = os.path.join(settings.TEMP_DIR, job_id)
+                if os.path.exists(job_dir):
+                    shutil.rmtree(job_dir, ignore_errors=True)
+
+    except Exception as outer_err:
+        print(f"[NOQUE] ===== FATAL: Could not even open DB session: {outer_err} =====")
+        traceback.print_exc()
 
 
 async def _process_single_file(db: AsyncSession, job_id: str, rel_path: str, language: str, code: str):
