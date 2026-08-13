@@ -10,11 +10,8 @@ import os
 from db import init_db
 from routers.jobs import router as jobs_router
 
-# Read allowed origins from environment, fallback to localhost for dev
-CORS_ORIGINS = os.getenv(
-    "CORS_ORIGINS",
-    "http://localhost:5173,http://localhost:3000"
-).split(",")
+# Read allowed origins from environment, fallback to wildcard for easy deployment
+CORS_ORIGINS = os.getenv("CORS_ORIGINS", "*").split(",")
 
 
 @asynccontextmanager
