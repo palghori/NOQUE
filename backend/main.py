@@ -17,7 +17,20 @@ CORS_ORIGINS = os.getenv("CORS_ORIGINS", "*").split(",")
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Initialize database tables on startup."""
+    from config import get_settings
+    settings = get_settings()
+    db_url = settings.async_database_url
+    # Mask the password in the URL for logging
+    masked = db_url
+    if "@" in db_url:
+        prefix = db_url.split("://")[0]
+        after_at = db_url.split("@")[1]
+        masked = f"{prefix}://***:***@{after_at}"
+    print(f"[NOQUE] Database URL: {masked}")
+    print(f"[NOQUE] Gemini Model: {settings.GEMINI_MODEL}")
+    print(f"[NOQUE] Gemini API Key set: {bool(settings.GEMINI_API_KEY)}")
     await init_db()
+    print(f"[NOQUE] Database tables initialized successfully")
     yield
 
 

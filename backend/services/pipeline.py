@@ -327,6 +327,10 @@ async def _ingest(db: AsyncSession, job_id: str, job_dir: str) -> str:
 
 async def _update_job(db: AsyncSession, job_id: str, **kwargs):
     """Update job fields in the database."""
+    print(f"[NOQUE] _update_job called with kwargs={list(kwargs.keys())}")
     stmt = update(Job).where(Job.id == job_id).values(**kwargs)
+    print(f"[NOQUE] _update_job executing SQL...")
     await db.execute(stmt)
+    print(f"[NOQUE] _update_job flushing...")
     await db.flush()
+    print(f"[NOQUE] _update_job done")
