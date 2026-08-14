@@ -1,11 +1,22 @@
-import { BrowserRouter, Routes, Route } from "react-router-dom";
+import { BrowserRouter, Routes, Route, useNavigate, useLocation } from "react-router-dom";
+import { VscHome, VscArchive, VscSettingsGear, VscGithubAlt } from "react-icons/vsc";
+import Dock from "./components/Dock";
 import UploadPage from "./pages/UploadPage";
 import ResultsPage from "./pages/ResultsPage";
 import "./index.css";
 
-function App() {
+function AppContent() {
+  const navigate = useNavigate();
+  const location = useLocation();
+
+  const dockItems = [
+    { icon: <VscHome size={18} />, label: "Home", onClick: () => navigate("/") },
+    { icon: <VscArchive size={18} />, label: "Upload ZIP", onClick: () => navigate("/") },
+    { icon: <VscGithubAlt size={18} />, label: "GitHub", onClick: () => window.open("https://github.com/palghori/NOQUE", "_blank") },
+    { icon: <VscSettingsGear size={18} />, label: "About NOQUE", onClick: () => alert("NOQUE v1.0 — AI-Powered Legacy Code Modernizer") },
+  ];
+
   return (
-    <BrowserRouter>
       <div className="min-h-screen">
         {/* Navigation Header */}
         <header
@@ -67,7 +78,24 @@ function App() {
           <Route path="/" element={<UploadPage />} />
           <Route path="/results/:jobId" element={<ResultsPage />} />
         </Routes>
+
+        {/* macOS-style Dock */}
+        <div style={{ position: "fixed", bottom: 0, left: 0, right: 0, zIndex: 100 }}>
+          <Dock
+            items={dockItems}
+            panelHeight={68}
+            baseItemSize={50}
+            magnification={70}
+          />
+        </div>
       </div>
+  );
+}
+
+function App() {
+  return (
+    <BrowserRouter>
+      <AppContent />
     </BrowserRouter>
   );
 }
