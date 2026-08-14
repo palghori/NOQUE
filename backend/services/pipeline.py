@@ -196,11 +196,19 @@ async def _process_single_file(db: AsyncSession, job_id: str, rel_path: str, lan
     """Process a single file: explain + refactor concurrently."""
     try:
         # Run explanation and refactoring concurrently for this file
-        explanation_result, refactor_result = await asyncio.gather(
-            explain_file(rel_path, language, code),
-            refactor_file(rel_path, language, code),
-            return_exceptions=True,
-        )
+        # Run sequentially to avoid burst limits, mimicking return_exceptions=True
+        try:
+            explanation_result = await explain_file(rel_path, language, code)
+        except Exception as e:
+            explanation_result = e
+            
+        import asyncio
+        await asyncio.sleep(5)  # Pause to respect burst limit
+        
+        try:
+            refactor_result = await refactor_file(rel_path, language, code)
+        except Exception as e:
+            refactor_result = e
 
         # Save explanation results
         if isinstance(explanation_result, dict) and "raw_response" not in explanation_result:
