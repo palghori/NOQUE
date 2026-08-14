@@ -6,6 +6,7 @@ import DependencyGraphTab from "../components/DependencyGraphTab";
 import TestsTab from "../components/TestsTab";
 import RefactorTab from "../components/RefactorTab";
 import { Sparkles, GitBranch, TestTube, RefreshCw, Loader } from "lucide-react";
+import MagicRings from "../components/MagicRings";
 
 const TABS = [
   { id: "explanation", label: "Explanation", icon: <Sparkles size={16} /> },
@@ -60,12 +61,50 @@ export default function ResultsPage() {
           alignItems: "center",
           justifyContent: "center",
           gap: 32,
+          position: "relative",
+          overflow: "hidden",
         }}
       >
-        <div className="animate-pulse-glow" style={{ width: 80, height: 80, borderRadius: 20, background: "var(--color-bg-card)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+        {/* MagicRings animated background while analyzing */}
+        <div
+          style={{
+            position: "absolute",
+            top: 0,
+            left: 0,
+            width: "100%",
+            height: "100%",
+            zIndex: 0,
+            opacity: 0.35,
+            pointerEvents: "none",
+          }}
+        >
+          <MagicRings
+            color="#6c5ce7"
+            colorTwo="#00cec9"
+            speed={0.8}
+            ringCount={5}
+            attenuation={12}
+            lineThickness={2}
+            baseRadius={0.3}
+            radiusStep={0.08}
+            scaleRate={0.12}
+            opacity={0.9}
+            noiseAmount={0.08}
+            rotation={15}
+            ringGap={1.5}
+            fadeIn={0.7}
+            fadeOut={0.5}
+            followMouse={true}
+            mouseInfluence={0.15}
+            hoverScale={1.1}
+            parallax={0.03}
+            clickBurst={true}
+          />
+        </div>
+        <div style={{ position: "relative", zIndex: 1 }} className="animate-pulse-glow" style={{ width: 80, height: 80, borderRadius: 20, background: "var(--color-bg-card)", display: "flex", alignItems: "center", justifyContent: "center" }}>
           <Loader size={36} color="var(--color-accent-light)" className="animate-spin" />
         </div>
-        <div style={{ textAlign: "center" }}>
+        <div style={{ textAlign: "center", position: "relative", zIndex: 1 }}>
           <h2 style={{ fontSize: "1.5rem", fontWeight: 700, marginBottom: 8 }}>Analyzing your codebase...</h2>
           <p style={{ color: "var(--color-text-secondary)", marginBottom: 24 }}>
             Gemini is reading, explaining, and modernizing your code.

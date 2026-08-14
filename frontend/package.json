@@ -22,6 +22,7 @@
     "react-diff-viewer-continued": "^4.4.0",
     "react-dropzone": "^20.1.0",
     "react-force-graph-2d": "^1.29.1",
-    "react-router-dom": "^7.18.2"
+    "react-router-dom": "^7.18.2",
+    "three": "^0.185.1"
   }
 }
