@@ -10,7 +10,20 @@ from google.genai import errors as genai_errors
 from config import get_settings
 
 settings = get_settings()
-client = genai.Client(api_key=settings.GEMINI_API_KEY)
+import itertools
+
+keys_str = getattr(settings, "GEMINI_API_KEYS", "")
+all_keys = [k.strip() for k in keys_str.split(",") if k.strip()]
+if settings.GEMINI_API_KEY and settings.GEMINI_API_KEY not in all_keys:
+    all_keys.insert(0, settings.GEMINI_API_KEY)
+if not all_keys:
+    all_keys = [""]
+
+clients = [genai.Client(api_key=k) for k in all_keys]
+client_cycle = itertools.cycle(clients)
+
+def get_next_client():
+    return next(client_cycle)
 
 # Fallback models in order of preference
 FALLBACK_MODELS = [
@@ -44,7 +57,7 @@ async def call_gemini(prompt: str, system_instruction: str = "", max_tokens: int
         for attempt in range(MAX_RETRIES):
             try:
                 # IMPORTANT: Use .aio. for async calls so we don't block the FastAPI event loop
-                response = await client.aio.models.generate_content(
+                response = await get_next_client().aio.models.generate_content(
                     model=model_name,
                     contents=prompt,
                     config=config,
