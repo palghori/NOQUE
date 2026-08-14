@@ -126,7 +126,13 @@ async def run_pipeline(job_id: str):
                             _process_single_file(db, job_id, rel_path, language, code)
                         )
 
-                    results = await asyncio.gather(*batch_tasks, return_exceptions=True)
+                    results = []
+                    for task in batch_tasks:
+                        try:
+                            res = await task
+                            results.append(res)
+                        except Exception as e:
+                            results.append(e)
                     for i, r in enumerate(results):
                         if isinstance(r, Exception):
                             print(f"[NOQUE] Batch task {i} failed: {r}")
@@ -157,7 +163,13 @@ async def run_pipeline(job_id: str):
                             )
                         )
 
-                    results = await asyncio.gather(*test_tasks, return_exceptions=True)
+                    results = []
+                    for task in test_tasks:
+                        try:
+                            res = await task
+                            results.append(res)
+                        except Exception as e:
+                            results.append(e)
                     for i, r in enumerate(results):
                         if isinstance(r, Exception):
                             print(f"[NOQUE] Test task {i} failed: {r}")
