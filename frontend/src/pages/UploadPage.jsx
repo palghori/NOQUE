@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { useDropzone } from "react-dropzone";
 import { Upload, Code, ArrowRight, FileArchive, Sparkles, GitBranch, TestTube, RefreshCw } from "lucide-react";
 import { createJobFromZip, createJobFromGitHub } from "../api";
+import ShapeGrid from "../components/ShapeGrid";
 
 export default function UploadPage() {
   const navigate = useNavigate();
@@ -93,6 +94,29 @@ export default function UploadPage() {
         overflow: "hidden",
       }}
     >
+      {/* Animated Grid Background */}
+      <div
+        style={{
+          position: "absolute",
+          top: 0,
+          left: 0,
+          width: "100%",
+          height: "100%",
+          zIndex: 0,
+          opacity: 0.4,
+        }}
+      >
+        <ShapeGrid
+          speed={0.5}
+          squareSize={40}
+          direction="diagonal"
+          borderColor="#2F293A"
+          hoverFillColor="#222"
+          shape="square"
+          hoverTrailAmount={0}
+        />
+      </div>
+
       {/* Background Gradient Orbs */}
       <div
         style={{
