@@ -1,64 +1,90 @@
 """
 gemini_client.py — Centralized Google Gemini API client.
 Handles all interactions with the Gemini model.
-Includes automatic retry and model fallback for resilience.
+Includes automatic retry, key rotation, and model fallback for resilience.
 """
 import json
 import time
 import asyncio
 import itertools
+import os
 from google import genai
 from google.genai import errors as genai_errors
 from config import get_settings
 
 settings = get_settings()
 
-keys_str = getattr(settings, "GEMINI_API_KEYS", "")
-all_keys = [k.strip() for k in keys_str.split(",") if k.strip()]
-if settings.GEMINI_API_KEY and settings.GEMINI_API_KEY not in all_keys:
-    all_keys.insert(0, settings.GEMINI_API_KEY)
+# ============================================================
+# BULLETPROOF KEY LOADING — reads from ALL possible sources
+# ============================================================
+all_keys = []
+
+# Source 1: GEMINI_API_KEYS (plural, comma-separated)
+keys_str = os.environ.get("GEMINI_API_KEYS", "") or getattr(settings, "GEMINI_API_KEYS", "")
+for k in keys_str.split(","):
+    k = k.strip()
+    if k and k not in all_keys:
+        all_keys.append(k)
+
+# Source 2: GEMINI_API_KEY (singular)
+single_key = os.environ.get("GEMINI_API_KEY", "") or getattr(settings, "GEMINI_API_KEY", "")
+if single_key and single_key.strip() not in all_keys:
+    all_keys.insert(0, single_key.strip())
+
 if not all_keys:
     all_keys = [""]
 
-print(f"[NOQUE] Loaded {len(all_keys)} Gemini API keys for rotation.")
+print(f"[NOQUE] ====== LOADED {len(all_keys)} API KEYS ======")
+for i, k in enumerate(all_keys):
+    print(f"[NOQUE] Key {i+1}: {k[:8]}...{k[-4:] if len(k) > 12 else '???'}")
 
 clients = [genai.Client(api_key=k) for k in all_keys]
-client_cycle = itertools.cycle(clients)
+_key_index = 0
+_key_lock = asyncio.Lock()
 
-def get_next_client():
-    return next(client_cycle)
+async def get_next_client():
+    """Thread-safe round-robin client selection."""
+    global _key_index
+    async with _key_lock:
+        client = clients[_key_index % len(clients)]
+        _key_index += 1
+        return client
 
-# Fallback models in order of preference
+# Fallback models
 FALLBACK_MODELS = [
     settings.GEMINI_MODEL,      # Primary (gemini-3.6-flash)
-    "gemini-3.5-flash-lite",    # Fast fallback
-    "gemini-flash-latest",      # Generic latest fallback
-    "gemini-3.5-flash",         # Previous gen fallback
+    "gemini-3.5-flash-lite",
+    "gemini-3.5-flash",
 ]
 
 MAX_RETRIES = 3
-RETRY_DELAY = 5  # seconds
+BASE_RETRY_DELAY = 15  # Start with 15 seconds, then exponential
 
-# Global rate limiter to ensure we NEVER exceed 15 RPM globally
-_LAST_CALL_TIME = 0
-_RATE_LIMIT_LOCK = asyncio.Lock()
+# ============================================================
+# STRICT GLOBAL RATE LIMITER
+# With 4 keys @ 15 RPM each = 60 RPM total = 1 request per second
+# But we'll be safe and force 4 second gaps
+# ============================================================
+_last_call_time = 0.0
+_rate_lock = asyncio.Lock()
+MIN_CALL_GAP = 4.0  # seconds between any two API calls
 
-async def enforce_rate_limit():
-    global _LAST_CALL_TIME
-    async with _RATE_LIMIT_LOCK:
+async def _enforce_rate_limit():
+    """Ensure at least MIN_CALL_GAP seconds between consecutive API calls."""
+    global _last_call_time
+    async with _rate_lock:
         now = time.time()
-        elapsed = now - _LAST_CALL_TIME
-        # 15 RPM = 1 request every 4 seconds. With 4 keys, we can go faster, 
-        # but to be completely safe against burst limits, force a 2 second global minimum gap.
-        if elapsed < 2.0:
-            await asyncio.sleep(2.0 - elapsed)
-        _LAST_CALL_TIME = time.time()
+        wait = MIN_CALL_GAP - (now - _last_call_time)
+        if wait > 0:
+            print(f"[NOQUE] Rate limiter: waiting {wait:.1f}s")
+            await asyncio.sleep(wait)
+        _last_call_time = time.time()
 
 
 async def call_gemini(prompt: str, system_instruction: str = "", max_tokens: int = 8192) -> str:
     """
     Send a prompt to Gemini and return the text response.
-    Automatically retries with fallback models on 503/429 errors.
+    Automatically retries with exponential backoff and fallback models.
     """
     config = genai.types.GenerateContentConfig(
         max_output_tokens=max_tokens,
@@ -72,44 +98,46 @@ async def call_gemini(prompt: str, system_instruction: str = "", max_tokens: int
     for model_name in FALLBACK_MODELS:
         for attempt in range(MAX_RETRIES):
             try:
-                await enforce_rate_limit()
+                # Enforce strict rate limit BEFORE every call
+                await _enforce_rate_limit()
                 
-                # IMPORTANT: Use .aio. for async calls so we don't block the FastAPI event loop
-                response = await get_next_client().aio.models.generate_content(
+                client = await get_next_client()
+                print(f"[NOQUE] Calling {model_name} (attempt {attempt+1}, key #{_key_index % len(clients)})")
+                
+                response = await client.aio.models.generate_content(
                     model=model_name,
                     contents=prompt,
                     config=config,
                 )
+                print(f"[NOQUE] SUCCESS with {model_name}")
                 return response.text
+                
             except genai_errors.ClientError as e:
                 last_error = e
                 error_str = str(e)
-                # 503 UNAVAILABLE or 429 RESOURCE_EXHAUSTED → retry/fallback
                 if "503" in error_str or "429" in error_str:
-                    print(f"[NOQUE] Model {model_name} attempt {attempt+1} failed ({error_str[:60]}), retrying...")
-                    await asyncio.sleep(RETRY_DELAY)
+                    # Exponential backoff: 15s, 30s, 60s
+                    delay = BASE_RETRY_DELAY * (2 ** attempt)
+                    print(f"[NOQUE] {model_name} attempt {attempt+1} FAILED (429/503). Waiting {delay}s before retry...")
+                    await asyncio.sleep(delay)
                     continue
                 else:
-                    # Other errors (400, 404, etc.) → don't retry, re-raise
                     raise
             except Exception as e:
                 last_error = e
                 print(f"[NOQUE] Unexpected error with {model_name}: {e}")
-                await asyncio.sleep(RETRY_DELAY)
+                await asyncio.sleep(BASE_RETRY_DELAY)
                 break  # Move to next model
 
-    # If all models and retries exhausted, raise the last error
     raise last_error
 
 
 async def call_gemini_json(prompt: str, system_instruction: str = "", max_tokens: int = 8192) -> dict | list:
     """
     Call Gemini and parse the response as JSON.
-    Handles cases where the model wraps output in markdown code fences.
     """
     raw = await call_gemini(prompt, system_instruction, max_tokens)
 
-    # Strip markdown code fences if present
     cleaned = raw.strip()
     if cleaned.startswith("```json"):
         cleaned = cleaned[7:]
@@ -122,5 +150,4 @@ async def call_gemini_json(prompt: str, system_instruction: str = "", max_tokens
     try:
         return json.loads(cleaned)
     except json.JSONDecodeError:
-        # If JSON parsing fails, return the raw text wrapped in a dict
         return {"raw_response": raw}
