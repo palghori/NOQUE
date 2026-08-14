@@ -31,7 +31,7 @@ from services.test_generator import generate_tests
 settings = get_settings()
 
 # Number of files to process concurrently
-BATCH_SIZE = 5
+BATCH_SIZE = 1
 
 
 async def run_pipeline(job_id: str):

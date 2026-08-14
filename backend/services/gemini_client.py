@@ -20,8 +20,8 @@ FALLBACK_MODELS = [
     "gemini-3.5-flash",         # Previous gen fallback
 ]
 
-MAX_RETRIES = 3
-RETRY_DELAY = 2  # seconds
+MAX_RETRIES = 5
+RETRY_DELAY = 10  # seconds
 
 
 import asyncio
