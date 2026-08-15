@@ -2,7 +2,7 @@
 
 > **HackOrbit | PS-06** — Built for the Google Developer Group hackathon.
 
-NOQUE takes a legacy codebase (ZIP upload or GitHub URL) and uses **Google Gemini 1.5 Pro** to automatically generate:
+NOQUE takes a legacy codebase (ZIP upload or GitHub URL) and uses **Google Gemini 3.6 Flash** to automatically generate:
 
 1. 🧠 **Natural Language Explanations** — Module & function-level summaries with confidence scores.
 2. 🕸️ **Dependency Graph** — Interactive force-directed visualization of imports and function calls.
